@@ -1,0 +1,300 @@
+---
+title: Using Metric Registrar
+owner: Metric Registrar
+---
+
+This topic describes how to install the Metric Registrar CLI plugin and emit custom app metrics to the Metric Registrar by registering your app as a metric source.
+
+For information about how the Metric Registrar processes custom app metrics and how to configure the Metric Registrar, see [Metric Registrar and Custom App Metrics](index.html).
+
+
+## <a id="overview"></a> Overview
+
+Registering your app as a metric source allows you to see your custom metrics in App Metrics and configure autoscaling rules with App Autoscaler.
+
+For more information, see the [App Metrics](https://docs.pivotal.io/app-metrics) documentation and [Scaling an App Using App Autoscaler](../appsman-services/autoscaler/using-autoscaler.html).
+
+
+## <a id="install-plugin"></a> Install the Plugin
+
+To install the Metric Registrar CLI plugin:
+
+1. Log in to the Cloud Foundry Command Line Interface (cf CLI).
+
+1. Run:
+
+	```
+	cf install-plugin -r CF-Community "metric-registrar"
+	```
+
+## <a id="register"></a> Register Your App
+
+To register your app as a metric source, do one of the following:
+
+* **Register a metrics endpoint:** Register a metrics endpoint for custom metrics to be parsed and emitted to Loggregator. For more information, see [Register a Metrics Endpoint](#register-endpoint).
+
+* **Register a structured log format:** Register a structured log format that can be emitted to Loggregator. For more information, see [Register a Structured Log Format](#register-log-format).
+
+<p class='note'><strong>Note:</strong> If you are migrating from and manually send data to Metrics Forwarder, <%= vars.company_name %> recommends registering a structured log format. For more information, see <a href="#register-log-format">Register a Structured Log Format</a> below.</p>
+
+### <a id="register-endpoint"></a> Register a Metrics Endpoint
+
+The Metric Registrar supports custom metrics created with the open-source tool, Prometheus. Prometheus uses a text-based exposition format common in many open-source libraries. It also provides several out-of-the-box metrics for different programming languages.
+
+For more information about Prometheus, see [What is Prometheus?](https://prometheus.io/docs/introduction/overview/#what-is-prometheus) in the Prometheus documentation.
+
+For examples of apps that use Prometheus to publish metrics to an endpoint, see [metric-registrar-examples](https://github.com/pivotal-cf/metric-registrar-examples) in GitHub.
+
+<p class='note'><strong>Note:</strong> These endpoints are public by default. If you do not want to expose public metrics endpoints for your app, see <a href="#register-log-format">Register a Structured Log Format</a> below.</p>
+
+<p class='note'><strong>Note:</strong> Metrics endpoints must be served over HTTPS.</p>
+
+#### <a id="prerequisites"></a> Prerequisites
+
+Before registering a metrics endpoint, you must:
+
+* For all Spring apps, update the `application.yml` file to include one or more Prometheus endpoints. For example:
+
+	```
+	management:
+	  endpoints:
+	    web:
+	      exposure:
+	        include: "prometheus"
+	```
+
+* For all Spring apps, update the security configuration file to permit access to the Prometheus endpoints. For an example, see [metric-registrar-examples](https://github.com/pivotal-cf/metric-registrar-examples/blob/master/java-spring-security/src/main/java/io/pivotal/metric_registrar/examples/spring_security/SecurityConfig.java) in GitHub.
+
+* For all other apps, see [Client libraries](https://prometheus.io/docs/instrumenting/clientlibs/) in the Prometheus documentation.
+
+#### <a id="endpoint-public"></a> Register a Public Metrics Endpoint
+
+To register a public metrics endpoint for an app:
+
+1. Log in to the cf CLI.
+
+1. For each Prometheus endpoint in your app, register the endpoint as a metric source by running:
+
+     ```
+     cf register-metrics-endpoint APP-NAME PATH-OR-URL --insecure
+     ```
+     Where:
+     * `APP-NAME` is the name of the app.
+     * `PATH-OR-URL` is the path to the Prometheus endpoint, or a URL without the scheme.
+
+     For example, if the app name is `example` and the metrics endpoint is at `https://example.com/metrics`, the command would be:
+
+    ```
+    cf register-metrics-endpoint example /metrics --insecure
+    ```
+    Or, if pulling metrics from a different URL:
+
+    ```
+    cf register-metrics-endpoint example otherexample.com/metrics --insecure
+    ```
+	<p class='note'><strong>Note:</strong> When you specify a URL to a metrics endpoint, the scheme must be omitted and the URL must use HTTPS. When you specify a path to a metrics endpoint, the path must start with a <code>/</code> character.</p>
+	<p class='note'><strong>Note:</strong> Each metrics endpoint registered with Metric Registrar creates a service instance. If the generated service name is longer than 50 characters, it is encoded with a hash.</p>
+	<p class='note'><strong>Note:</strong> In Metric Registrar v1.3.1 and later, you must use the <code>--insecure</code> flag for the same values you provided in previous versions.</p>
+
+#### <a id="endpoint-verify"></a> Verify a Metrics Endpoint
+
+<%= vars.company_name %> recommends that you install the LogCache cf CLI plugin to view metrics.
+
+To install and use the Log Cache cf CLI plugin:
+
+1. To install Log Cache, run:
+
+    ```
+    cf install-plugin -r CF-Community "log-cache"
+    ```
+
+1. To view metrics for an app, run:
+
+    ```
+    cf tail --envelope-class=metrics APP-NAME
+    ```
+    Where `APP-NAME` is the name of your app.
+    <br>
+    <br>
+    For example, if you provided a custom metric called `users_per_cpu` as a gauge, you should see the following output:
+    <pre class="terminal">2019-06-18T10:49:28.27-0600 [app-name/1] GAUGE cpu:0.154763 percentage disk:14000128.000000 bytes disk_quota:33554432.000000 bytes memory:10190848.000000 bytes memory_quota:33554432.000000 bytes
+    2019-06-18T10:49:26.42-0600 [app-name/1] GAUGE users_per_cpu:557.500000</pre>
+    Where the first line is default container metrics and the second line is custom app metrics `users_per_cpu`.
+    <p class='note'><strong>Note:</strong> The Metric Registrar produces the following benign error message at every polling interval: <code>[LGR/] ERR Invalid syslog drain URL: parse failure</code></p>
+
+#### <a id="endpoint-private"></a> Register a Private Metrics Endpoint
+
+To register a private metrics endpoint:
+
+1. Set up a Prometheus endpoint that serves on any port other than 8081.
+2. Register the endpoint by running:
+
+	```
+	cf register-metrics-endpoint APP-NAME PATH --internal-port PORT
+	```
+	Where:
+	* `APP-NAME` is the name of the app.
+	* `PATH` is the path to the Prometheus endpoint.
+	* `PORT` is the port where the Prometheus endpoint is served.
+
+### <a id="register-log-format"></a> Register a Structured Log Format
+
+The Metric Registrar supports metrics emitted in JSON or DogStatsD formats. For more information about these formats, see [JSON](#json) and [DogStatsD](#dogstatsd) below.
+
+To register your app as a metric source:
+
+1. Log in to the cf CLI.
+
+1. Run:
+
+	```
+	cf register-log-format APP-NAME FORMAT
+	```
+	Where:
+	* `APP-NAME` is the name of your app.
+	* `FORMAT` is either `json` or `DogStatsD`.
+
+1. In your app, log a structured `json` or `DogStatsD` message to represent the custom metric.
+
+#### <a id="json"></a> JSON
+
+The table below shows the supported JSON format for event, gauge, and counter log types.
+
+<table>
+<tr>
+	<th>Type</th>
+	<th>Format</th>
+</tr>
+<tr>
+	<td>Events</td>
+	<td>
+		<pre>
+{
+   "type": "event",
+   "title": "title",
+   "body": "body",
+   "tags": {
+     "tag1": "tag value"
+   }
+}
+		</pre>
+	</td>
+</tr>
+<tr>
+	<td>Gauges</td>
+	<td>
+		<pre>
+{
+   "type": "gauge",
+   "name": "some-counter",
+   "value": <float>,
+   "tags": {
+     "tag1": "tag value"
+   }
+}
+		</pre>
+	</td>
+</tr>
+<tr>
+	<td>Counters</td>
+	<td>
+		<pre>
+{
+   "type": "counter",
+   "name": "some-counter",
+   "delta": <uint>,
+   "tags": {
+     "tag1": "tag value"
+   }
+}
+		</pre>
+	</td>
+</tr>
+
+</table>
+
+#### <a id="dogstatsd"></a> DogStatsD Log Format
+
+The table below shows the supported DogStatsD format for event, gauge, and counter log types. It also lists the supported fields. For more information about DogStatsD, see [DogStatsD](https://docs.datadoghq.com/developers/dogstatsd/) in the Datadog documentation.
+
+<table class="nice">
+<tr>
+	<th width="10%">Type</th>
+	<th width="70%">Format</th>
+	<th width="20%">Supported Fields</th>
+</tr>
+<tr>
+	<td>Events</td>
+	<td><pre>_e{title.length,text.length}:title|text|d:timestamp|</br>h:hostname|p:priority|t:alert_type|#tag1,tag2</pre></td>
+	<td>
+		<code>title</code><br>
+		<code>text</code>
+	</td>
+</tr>
+<tr>
+	<td>Gauges</td>
+	<td><pre>gauge.name:value|g|@sample_rate|#tag1:value,tag2</pre></td>
+	<td>
+		<code>gauge.name</code><br>
+		<code>value</code>
+	</td>
+</tr>
+<tr>
+	<td>Counters</td>
+	<td><pre>counter.name:value|c|@sample_rate|#tag1:value,tag2</pre></td>
+	<td>
+		<code>counter.name</code><br>
+		<code>value</code>
+	</td>
+</tr>
+</table>
+
+#### <a id="cups-method"></a> Register Using CUPS
+
+Metric Registrar uses the syslog drain User Provided Service.
+
+To create a Metric Registrar Service:
+
+1. Create the service by running:
+
+	```
+	cf create-user-provided-service SERVICE-NAME -l BINDING
+	```
+	Where:
+	* `SERVICE-NAME` is the name you choose for the service.
+	* `BINDING` is the service binding. The binding can use the following schemes:
+		- `secure-endpoint://`
+		- `metrics-endpoint://`
+		- `structured-format://`
+
+1. Bind the provided service by running:
+
+	```
+	cf bind-service APP-NAME SERVICE-NAME
+	```
+	Where:
+	* `APP-NAME` is the name of the app.
+	* `SERVICE-NAME` is the service name you chose in the previous step.
+
+The Metric Registrar supports metrics emitted in JSON or DogStatsD formats.
+For metrics endpoints, the rest of the URI specifies the host, port, and path of the metrics endpoint.
+
+For example:
+
+```
+secure-endpoint://:8081/metrics
+metrics-endpoint:///metrics
+structured-format://json
+```
+
+For a secure endpoint, you must expose the additional port you are serving on using Diego.
+
+For example:
+
+```
+cf curl /v2/apps/APP-GUID -X PUT -d '{"ports": [PORT1, PORT2, PORT3...]}'
+```
+Where:
+
+* `APP-GUID` is the GUID of your app.
+*  `PORT1, PORT2, PORT3...` is a comma-separated list of the ports on which you want your app to receive traffic.

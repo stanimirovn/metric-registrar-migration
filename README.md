@@ -1,1 +1,1 @@
-# metric-registrar-migration
+# Documentation for Metric Registrar
